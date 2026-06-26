@@ -1,0 +1,66 @@
+﻿services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ygo
+      POSTGRES_PASSWORD: ygo
+      POSTGRES_DB: ygo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/initdb/00_extensions.sql:/docker-entrypoint-initdb.d/00_extensions.sql:ro
+      - ./schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./sql/schema_additions.sql:/docker-entrypoint-initdb.d/02_additions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ygo -d ygo"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ygo:ygo@db:5432/ygo
+      PYTHONPATH: apps/api
+    working_dir: /app
+    command: sh -c "python worker/sync_cards.py && python worker/seed_vsk9.py"
+    volumes:
+      - card_images:/app/apps/web/public/cards
+    restart: "no"
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ygo:ygo@db:5432/ygo
+    working_dir: /app/apps/api
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    depends_on:
+      - api
+    environment:
+      NEXT_PUBLIC_API_BASE: http://localhost:8000
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+      - card_images:/app/public/cards
+volumes:
+  pgdata:
+  card_images:
+  web_node_modules:
