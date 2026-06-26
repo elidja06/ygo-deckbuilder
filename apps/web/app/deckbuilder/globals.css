@@ -1,0 +1,59 @@
+/* apps/web/app/globals.css */
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Rajdhani:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0a0a0f;
+  --panel: #12121a;
+  --edge: #262633;
+  --cyan: #22d3ee;
+  --magenta: #e84bd2;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: #e6e6ef;
+  font-family: "Rajdhani", system-ui, sans-serif;
+}
+
+/* Police d'affichage (titres, labels) */
+.font-display {
+  font-family: "Orbitron", sans-serif;
+  letter-spacing: 0.04em;
+}
+
+/* Effet "scanlines" cyberpunk pour les barres */
+.scanlines {
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.025) 0,
+    rgba(255, 255, 255, 0.025) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+/* Scrollbars discrètes */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: #262633;
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: #34343f;
+}
+
+/* React Flow : fond transparent pour épouser le thème */
+.react-flow__attribution {
+  display: none;
+}
