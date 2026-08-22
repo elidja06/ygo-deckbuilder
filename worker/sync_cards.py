@@ -93,7 +93,7 @@ def parse_card(raw: dict, archetype_id: int | None) -> dict:
         "race": raw.get("race"),
         "niveau_rang_link": niveau,
         "atk": raw.get("atk"),
-        "def_": raw.get("def"),
+        "def": raw.get("def"),
         "effet_fr": raw.get("desc"),
         "image_locale": f"/cards/{card_id}.jpg",
         "ban_tcg": normalize_api_status(ban.get("ban_tcg")),
@@ -127,7 +127,7 @@ async def upsert_cards(cards_raw: list[dict], arch_map: dict[str, int]) -> None:
     # Colonnes à rafraîchir lors d'un conflit sur la clé primaire `id`.
     updatable = [
         "archetype_id", "nom_fr", "type", "frame_type", "attribut", "race",
-        "niveau_rang_link", "atk", "def_", "effet_fr", "image_locale",
+        "niveau_rang_link", "atk", "def", "effet_fr", "image_locale",
         "ban_tcg", "ban_ocg",
     ]
 
@@ -137,7 +137,7 @@ async def upsert_cards(cards_raw: list[dict], arch_map: dict[str, int]) -> None:
             stmt = pg_insert(Card).values(chunk)
             stmt = stmt.on_conflict_do_update(
                 index_elements=[Card.id],
-                set_={col: getattr(stmt.excluded, col) for col in updatable},
+                set_={col: stmt.excluded[col] for col in updatable},
             )
             await session.execute(stmt)
         await session.commit()

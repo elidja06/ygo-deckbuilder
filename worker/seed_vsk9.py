@@ -103,7 +103,7 @@ def parse_card(raw: dict, archetype_id: int | None) -> dict:
         "id": cid, "archetype_id": archetype_id, "nom_fr": raw["name"],
         "type": raw["type"], "frame_type": raw.get("frameType"),
         "attribut": raw.get("attribute"), "race": raw.get("race"),
-        "niveau_rang_link": niveau, "atk": raw.get("atk"), "def_": raw.get("def"),
+        "niveau_rang_link": niveau, "atk": raw.get("atk"), "def": raw.get("def"),
         "effet_fr": raw.get("desc"), "image_locale": f"/cards/{cid}.jpg",
         "ban_tcg": normalize_api_status(ban.get("ban_tcg")),
         "ban_ocg": normalize_api_status(ban.get("ban_ocg")),
@@ -221,12 +221,12 @@ async def seed() -> None:
         # 2) cards (upsert, archetype_id renseigné depuis l'API)
         rows = [parse_card(c, arch_map.get(c.get("archetype"))) for c in cards.values()]
         updatable = ["archetype_id", "nom_fr", "type", "frame_type", "attribut",
-                     "race", "niveau_rang_link", "atk", "def_", "effet_fr",
+                     "race", "niveau_rang_link", "atk", "def", "effet_fr",
                      "image_locale", "ban_tcg", "ban_ocg"]
         stmt = pg_insert(Card).values(rows)
         await s.execute(stmt.on_conflict_do_update(
             index_elements=[Card.id],
-            set_={c: getattr(stmt.excluded, c) for c in updatable},
+            set_={c: stmt.excluded[c] for c in updatable},
         ))
         cid = {alias: int(c["id"]) for alias, c in cards.items()}  # alias -> passcode
 
