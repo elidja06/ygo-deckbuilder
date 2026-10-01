@@ -48,7 +48,7 @@ UPSERT_CHUNK = 500
 #  Étape 1 — Version de base                                                   #
 # --------------------------------------------------------------------------- #
 async def fetch_db_version(client: httpx.AsyncClient) -> str:
-    resp = await client.get(f"{API_BASE}/checkDBVer.php")
+    resp = await client.get(f"{API_BASE}/checkDBVer.php", timeout=60.0)
     resp.raise_for_status()
     # Réponse : [{"database_version": "...", "last_update_date": "..."}]
     return str(resp.json()[0]["database_version"])

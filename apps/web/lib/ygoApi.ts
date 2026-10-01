@@ -64,7 +64,7 @@ export interface Suggestion {
 // ---------- Helpers fetch ----------
 
 async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const url = new URL(`${API_BASE}${path}`);
+  const url = new URL(`${API_BASE}${path}`, window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`API ${res.status} sur ${path}`);
@@ -98,3 +98,7 @@ export const suggestCards = (cardIds: number[], format: Format) =>
 // Matchups de l'archétype dominant du deck.
 export const getMatchups = (archetypeId: number) =>
   get<Matchup[]>(`/meta/matchups`, { archetype_id: String(archetypeId) });
+
+// Matchups déduits du deck (archétype dominant calculé côté backend).
+export const fetchMatchupsForDeck = (cardIds: number[], format: Format) =>
+  post<Matchup[]>("/meta/matchups/by-deck", { cardIds, format });

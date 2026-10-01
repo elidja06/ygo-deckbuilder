@@ -30,7 +30,7 @@ app = FastAPI(title="YGO Deckbuilder API")
 # Le front (Next.js) tourne sur un autre port en dev.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -92,4 +92,29 @@ async def meta_matchups(
             "conseilFr": m.conseil_fr or "",
         }
         for m in rows
+    ]
+
+
+# ---- Matchups déduits du deck (archétype dominant) ----
+from collections import Counter as _Counter
+
+
+@app.post("/meta/matchups/by-deck")
+async def matchups_by_deck(
+    body: DeckBody, session: AsyncSession = Depends(get_session)
+) -> list[dict]:
+    rows = (await session.execute(
+        select(Card.archetype_id).where(
+            Card.id.in_(set(body.cardIds)), Card.archetype_id.is_not(None)
+        )
+    )).scalars().all()
+    if not rows:
+        return []
+    dominant = _Counter(rows).most_common(1)[0][0]
+    matchups = (await session.execute(
+        select(Matchup).where(Matchup.archetype_id == dominant)
+    )).scalars().all()
+    return [
+        {"deckAdverse": m.deck_adverse, "faveur": m.faveur, "conseilFr": m.conseil_fr or ""}
+        for m in matchups
     ]
