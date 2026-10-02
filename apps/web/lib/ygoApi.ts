@@ -1,10 +1,5 @@
 // apps/web/lib/ygoApi.ts
-// Client typé côté front. Il ne parle JAMAIS à YGOPRODeck en direct :
-// il passe par le backend FastAPI, qui sert le cache local et la logique.
-
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
-
-// ---------- Types partagés (idéalement dans packages/types) ----------
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api";
 
 export type Zone = "main" | "extra" | "side";
 export type Format = "advanced" | "traditional" | "speed_duel" | "master_duel";
@@ -14,15 +9,17 @@ export interface Card {
   id: number;
   nomFr: string;
   type: string;
-  frameType: string;            // "effect" | "link" | "xyz" | "spell" | "trap" ...
+  frameType: string;
   attribut: string | null;
   race: string | null;
   niveauRangLink: number | null;
   atk: number | null;
   def: number | null;
   effetFr: string;
-  imageLocale: string;          // /cards/{id}.jpg réhébergée
-  banStatus: BanStatus;         // déjà résolu (override > API) pour le format demandé
+  imageLocale: string;
+  /** "fr" (traduite) ou "en" (non traduite) — affiche la vignette EN */
+  langue?: "fr" | "en";
+  banStatus: BanStatus;
 }
 
 export interface DeckEntry {
@@ -31,10 +28,9 @@ export interface DeckEntry {
   quantite: number;
 }
 
-// Une étape de combo, telle que consommée par le flowchart (arbre)
 export interface ComboStep {
   id: string;
-  parentId: string | null;      // null = racine
+  parentId: string | null;
   cardId: number | null;
   action: string;
   explicationFr: string;
@@ -46,7 +42,7 @@ export interface Combo {
   cartesRequises: number;
   resultat: string;
   steps: ComboStep[];
-  realisable: boolean;          // calculé par le back : toutes les cartes-clés sont-elles dans le deck ?
+  realisable: boolean;
 }
 
 export interface Matchup {
@@ -58,13 +54,16 @@ export interface Matchup {
 export interface Suggestion {
   card: Card;
   categorie: "staple" | "handtrap" | "tech" | "extra";
-  raison: string;               // pourquoi cette carte entre en synergie
+  raison: string;
 }
 
 // ---------- Helpers fetch ----------
+// window.location.origin permet d'utiliser une base relative ("/api").
 
 async function get<T>(path: string, params?: Record<string, string>): Promise<T> {
-  const url = new URL(`${API_BASE}${path}`, window.location.origin);
+  const base =
+    typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
+  const url = new URL(`${API_BASE}${path}`, base);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   const res = await fetch(url.toString(), { headers: { Accept: "application/json" } });
   if (!res.ok) throw new Error(`API ${res.status} sur ${path}`);
@@ -83,22 +82,26 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 
 // ---------- Endpoints ----------
 
-// Recherche floue de cartes (noms FR), filtrée par format pour le statut de banlist.
-export const searchCards = (q: string, format: Format) =>
-  get<Card[]>("/cards/search", { q, format });
+/** Recherche par nom. `types` = natures séparées par des virgules (spell,trap,fusion…). */
+export const searchCards = (q: string, format: Format, types?: string) =>
+  get<Card[]>("/cards/search", {
+    q,
+    format,
+    ...(types ? { types } : {}),
+  });
 
-// Combos réalisables avec le deck courant (ids de cartes en main).
+/** Toutes les cartes du même archétype — bouton « Cartes liées ». */
+export const fetchRelatedCards = (cardId: number, format: Format) =>
+  get<Card[]>("/cards/by-archetype", { card_id: String(cardId), format });
+
 export const generateCombos = (cardIds: number[], format: Format) =>
   post<Combo[]>("/combos/generate", { cardIds, format });
 
-// Suggestions d'optimisation (staples, hand traps, tech) pour l'archétype détecté.
 export const suggestCards = (cardIds: number[], format: Format) =>
   post<Suggestion[]>("/suggest", { cardIds, format });
 
-// Matchups de l'archétype dominant du deck.
 export const getMatchups = (archetypeId: number) =>
-  get<Matchup[]>(`/meta/matchups`, { archetype_id: String(archetypeId) });
+  get<Matchup[]>("/meta/matchups", { archetype_id: String(archetypeId) });
 
-// Matchups déduits du deck (archétype dominant calculé côté backend).
 export const fetchMatchupsForDeck = (cardIds: number[], format: Format) =>
   post<Matchup[]>("/meta/matchups/by-deck", { cardIds, format });

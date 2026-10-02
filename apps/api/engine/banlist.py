@@ -103,5 +103,6 @@ def card_to_dict(card: Card, status: BanStatus) -> dict:
         "def": card.def_,
         "effetFr": card.effet_fr or "",
         "imageLocale": card.image_locale or "",
+        "langue": card.langue or "fr",
         "banStatus": status,
     }

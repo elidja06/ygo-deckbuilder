@@ -52,6 +52,7 @@ class Card(Base):
     def_: Mapped[int | None] = mapped_column("def", Integer)
     effet_fr: Mapped[str | None] = mapped_column(Text)
     image_locale: Mapped[str | None] = mapped_column(Text)
+    langue: Mapped[str | None] = mapped_column(String(2), default="fr")
     # Statut de banlist API, normalisé (banned/limited/semi_limited) ou NULL.
     ban_tcg: Mapped[str | None] = mapped_column(String(16))
     ban_ocg: Mapped[str | None] = mapped_column(String(16))

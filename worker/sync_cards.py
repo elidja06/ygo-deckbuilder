@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 # worker/sync_cards.py
-"""Worker de synchronisation YGOPRODeck -> PostgreSQL + images locales.
+"""Synchronisation YGOPRODeck -> PostgreSQL + images locales.
 
-Pipeline :
-  1. checkDBVer.php : on ne resynchronise que si la version a changé (sauf --force).
-  2. cardinfo.php?language=fr : un seul GET récupère tout le pool FR.
-  3. Upsert des `archetypes` puis des `cards` (SQLAlchemy + ON CONFLICT).
-  4. Téléchargement des images manquantes vers public/cards/{id}.jpg, en respectant
-     strictement le plafond de 20 req/s de l'API (on se cale à 15 pour la marge).
+Mode HYBRIDE :
+  1. dump FR  -> noms et effets en français pour tout ce qui est traduit
+  2. dump EN  -> complète les cartes absentes du FR (archétypes récents :
+     Vanquish Soul, Ryzeal, etc.), marquées langue='en'
+  3. images téléchargées localement en respectant 15 req/s (plafond API : 20)
 
-Lancement :
+Lancement depuis la racine du projet :
+    DATABASE_URL="postgresql+asyncpg://ygo:ygo@localhost:5432/ygo" \
     PYTHONPATH=apps/api python worker/sync_cards.py [--force]
-(le sys.path ci-dessous rend l'import `db.*` fonctionnel sans configuration.)
 """
 from __future__ import annotations
 
@@ -26,7 +25,6 @@ from aiolimiter import AsyncLimiter
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-# Rend les modules de l'API (db.*, engine.*) importables depuis ce script externe.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "apps" / "api"))
 
 from db.database import SessionLocal  # noqa: E402
@@ -36,11 +34,8 @@ from engine.banlist import normalize_api_status  # noqa: E402
 API_BASE = "https://db.ygoprodeck.com/api/v7"
 IMAGE_DIR = pathlib.Path("apps/web/public/cards")
 
-# Plafond API = 20 req/s. On se limite à 15/s pour ne jamais frôler le bannissement.
 RATE_LIMITER = AsyncLimiter(max_rate=15, time_period=1.0)
-# Concurrence des téléchargements (bornée séparément du débit).
 IMAGE_CONCURRENCY = 8
-
 UPSERT_CHUNK = 500
 
 
@@ -50,7 +45,6 @@ UPSERT_CHUNK = 500
 async def fetch_db_version(client: httpx.AsyncClient) -> str:
     resp = await client.get(f"{API_BASE}/checkDBVer.php", timeout=60.0)
     resp.raise_for_status()
-    # Réponse : [{"database_version": "...", "last_update_date": "..."}]
     return str(resp.json()[0]["database_version"])
 
 
@@ -61,30 +55,44 @@ async def already_synced(version: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-#  Étape 2 — Dump complet en français                                          #
+#  Étape 2 — Dumps FR puis EN                                                  #
 # --------------------------------------------------------------------------- #
-async def fetch_full_dump_fr(client: httpx.AsyncClient) -> list[dict]:
+async def fetch_dump(client: httpx.AsyncClient, language: str | None) -> list[dict]:
+    params = {"language": language} if language else {}
     async with RATE_LIMITER:
-        resp = await client.get(
-            f"{API_BASE}/cardinfo.php",
-            params={"language": "fr"},
-            timeout=120.0,  # le dump complet pèse plusieurs Mo
-        )
+        resp = await client.get(f"{API_BASE}/cardinfo.php", params=params, timeout=180.0)
     resp.raise_for_status()
     return resp.json()["data"]
 
 
-def parse_card(raw: dict, archetype_id: int | None) -> dict:
-    """Transforme une carte API en valeurs prêtes pour l'upsert ORM.
+def merge_dumps(fr: list[dict], en: list[dict]) -> list[dict]:
+    """Garde toutes les cartes FR, complète avec les EN absentes du FR."""
+    fusion: dict[int, dict] = {}
+    for c in fr:
+        c["_langue"] = "fr"
+        fusion[int(c["id"])] = c
+    ajouts = 0
+    for c in en:
+        cid = int(c["id"])
+        if cid not in fusion:
+            c["_langue"] = "en"
+            fusion[cid] = c
+            ajouts += 1
+    print(f"[sync] {len(fr)} cartes FR + {ajouts} cartes EN complémentaires")
+    return list(fusion.values())
 
-    Les Link n'ont pas de `level` mais un `linkval` : on unifie dans
-    `niveau_rang_link`. On normalise le statut de banlist API dès l'ingestion.
+
+def parse_card(raw: dict, archetype_id: int | None) -> dict:
+    """Carte API -> valeurs prêtes pour l'upsert.
+
+    Les monstres Lien n'ont pas de `level` mais un `linkval` : unifiés dans
+    `niveau_rang_link`. Le statut de banlist API est normalisé à l'ingestion.
     """
     niveau = raw["level"] if "level" in raw else raw.get("linkval")
     ban = raw.get("banlist_info") or {}
-    card_id = int(raw["id"])
+    cid = int(raw["id"])
     return {
-        "id": card_id,
+        "id": cid,
         "archetype_id": archetype_id,
         "nom_fr": raw["name"],
         "type": raw["type"],
@@ -95,7 +103,8 @@ def parse_card(raw: dict, archetype_id: int | None) -> dict:
         "atk": raw.get("atk"),
         "def": raw.get("def"),
         "effet_fr": raw.get("desc"),
-        "image_locale": f"/cards/{card_id}.jpg",
+        "image_locale": f"/cards/{cid}.jpg",
+        "langue": raw.get("_langue", "fr"),
         "ban_tcg": normalize_api_status(ban.get("ban_tcg")),
         "ban_ocg": normalize_api_status(ban.get("ban_ocg")),
     }
@@ -105,7 +114,6 @@ def parse_card(raw: dict, archetype_id: int | None) -> dict:
 #  Étape 3 — Upsert en base                                                    #
 # --------------------------------------------------------------------------- #
 async def upsert_archetypes(cards_raw: list[dict]) -> dict[str, int]:
-    """Insère les archétypes manquants et renvoie la map nom -> id."""
     noms = sorted({c["archetype"] for c in cards_raw if c.get("archetype")})
     async with SessionLocal() as session:
         if noms:
@@ -121,16 +129,12 @@ async def upsert_archetypes(cards_raw: list[dict]) -> dict[str, int]:
 
 
 async def upsert_cards(cards_raw: list[dict], arch_map: dict[str, int]) -> None:
-    """Upsert des cartes par paquets, en écrasant les colonnes mises à jour."""
     rows = [parse_card(c, arch_map.get(c.get("archetype"))) for c in cards_raw]
-
-    # Colonnes à rafraîchir lors d'un conflit sur la clé primaire `id`.
     updatable = [
         "archetype_id", "nom_fr", "type", "frame_type", "attribut", "race",
         "niveau_rang_link", "atk", "def", "effet_fr", "image_locale",
-        "ban_tcg", "ban_ocg",
+        "langue", "ban_tcg", "ban_ocg",
     ]
-
     async with SessionLocal() as session:
         for i in range(0, len(rows), UPSERT_CHUNK):
             chunk = rows[i : i + UPSERT_CHUNK]
@@ -145,15 +149,13 @@ async def upsert_cards(cards_raw: list[dict], arch_map: dict[str, int]) -> None:
 
 async def mark_synced(version: str) -> None:
     async with SessionLocal() as session:
+        maintenant = datetime.now(timezone.utc)
         stmt = (
             pg_insert(SyncState)
-            .values(id=1, last_db_version=version, synced_at=datetime.now(timezone.utc))
+            .values(id=1, last_db_version=version, synced_at=maintenant)
             .on_conflict_do_update(
                 index_elements=[SyncState.id],
-                set_={
-                    "last_db_version": version,
-                    "synced_at": datetime.now(timezone.utc),
-                },
+                set_={"last_db_version": version, "synced_at": maintenant},
             )
         )
         await session.execute(stmt)
@@ -167,40 +169,31 @@ async def download_image(
     client: httpx.AsyncClient, sem: asyncio.Semaphore, card_id: int, url: str
 ) -> None:
     dest = IMAGE_DIR / f"{card_id}.jpg"
-    if dest.exists():  # incrémental : on ne retélécharge jamais une image présente
+    if dest.exists():  # incrémental : jamais retéléchargée
         return
-    async with sem, RATE_LIMITER:  # concurrence ET débit bornés
+    async with sem, RATE_LIMITER:
         resp = await client.get(url, timeout=30.0)
         if resp.status_code == 200:
             dest.write_bytes(resp.content)
 
 
-async def download_missing_images(
-    client: httpx.AsyncClient, cards_raw: list[dict]
-) -> None:
+async def download_missing_images(client: httpx.AsyncClient, cards_raw: list[dict]) -> None:
     IMAGE_DIR.mkdir(parents=True, exist_ok=True)
     sem = asyncio.Semaphore(IMAGE_CONCURRENCY)
     tasks = []
     for c in cards_raw:
         images = c.get("card_images") or []
-        if not images:
-            continue
-        # Première entrée = artwork par défaut, clé sur l'id de la carte.
-        tasks.append(
-            download_image(client, sem, int(c["id"]), images[0]["image_url"])
-        )
-    # gather borné par le sémaphore + le rate limiter ; tolérant aux erreurs unitaires.
-    for batch_start in range(0, len(tasks), 1000):
-        await asyncio.gather(
-            *tasks[batch_start : batch_start + 1000], return_exceptions=True
-        )
+        if images:
+            tasks.append(download_image(client, sem, int(c["id"]), images[0]["image_url"]))
+    for debut in range(0, len(tasks), 1000):
+        await asyncio.gather(*tasks[debut : debut + 1000], return_exceptions=True)
 
 
 # --------------------------------------------------------------------------- #
 #  Orchestration                                                               #
 # --------------------------------------------------------------------------- #
 async def run(force: bool = False) -> None:
-    headers = {"User-Agent": "ygo-deckbuilder-sync/1.0"}
+    headers = {"User-Agent": "ygo-deckbuilder-sync/2.0"}
     async with httpx.AsyncClient(headers=headers) as client:
         version = await fetch_db_version(client)
         print(f"[sync] version base distante : {version}")
@@ -210,8 +203,12 @@ async def run(force: bool = False) -> None:
             return
 
         print("[sync] récupération du dump FR…")
-        cards_raw = await fetch_full_dump_fr(client)
-        print(f"[sync] {len(cards_raw)} cartes reçues.")
+        fr = await fetch_dump(client, "fr")
+        print("[sync] récupération du dump EN (complément)…")
+        en = await fetch_dump(client, None)
+
+        cards_raw = merge_dumps(fr, en)
+        print(f"[sync] {len(cards_raw)} cartes au total.")
 
         arch_map = await upsert_archetypes(cards_raw)
         print(f"[sync] {len(arch_map)} archétypes en base.")
@@ -227,10 +224,8 @@ async def run(force: bool = False) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Synchronisation YGOPRODeck.")
-    parser.add_argument(
-        "--force", action="store_true", help="resynchroniser même si la version est identique"
-    )
+    parser = argparse.ArgumentParser(description="Synchronisation YGOPRODeck (hybride FR+EN).")
+    parser.add_argument("--force", action="store_true", help="resynchroniser malgré la version")
     args = parser.parse_args()
     asyncio.run(run(force=args.force))
 
