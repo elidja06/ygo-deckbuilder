@@ -6,6 +6,9 @@
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS ban_tcg VARCHAR(16);
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS ban_ocg VARCHAR(16);
 
+-- 1b) Langue de la carte : 'fr' (traduite) ou 'en' (non traduite, vignette EN).
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS langue VARCHAR(2) DEFAULT 'fr';
+
 -- 2) Pools de suggestion (à pré-remplir à la main).
 CREATE TABLE IF NOT EXISTS staples (
     id       SERIAL PRIMARY KEY,
