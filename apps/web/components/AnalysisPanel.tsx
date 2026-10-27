@@ -48,6 +48,15 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
 
   const signature = cardIds.join(",") + "|" + format;
 
+  // L'onglet Combos n'apparaît que s'il existe des combos pour l'archétype du deck.
+  const onglets: Onglet[] = [
+    "analyse",
+    "suggestions",
+    ...(combos.length > 0 ? (["combos"] as Onglet[]) : []),
+    "matchups",
+  ];
+  const ongletActif: Onglet = onglets.includes(onglet) ? onglet : "analyse";
+
   // Recalcul à chaque modification du deck (anti-rebond 450 ms).
   useEffect(() => {
     if (cardIds.length === 0) {
@@ -84,12 +93,12 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
     <div className="flex h-full flex-col bg-[#12121a]">
       {/* Onglets */}
       <div className="flex border-b border-[#262633]">
-        {(["analyse", "suggestions", "combos", "matchups"] as Onglet[]).map((o) => (
+        {onglets.map((o) => (
           <button
             key={o}
             onClick={() => setOnglet(o)}
             className={`flex-1 px-2 py-2.5 font-display text-[11px] uppercase tracking-wider transition-colors ${
-              onglet === o
+              ongletActif === o
                 ? "border-b-2 border-[#22d3ee] text-[#22d3ee]"
                 : "text-[#8a8aa0] hover:text-[#e6e6ef]"
             }`}
@@ -115,11 +124,11 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
           <p className="mt-8 text-center text-xs text-[#8a8aa0]">
             Ajoutez des cartes au Main Deck pour lancer l'analyse.
           </p>
-        ) : onglet === "analyse" ? (
+        ) : ongletActif === "analyse" ? (
           <AnalyseTab analyse={analyse} />
-        ) : onglet === "suggestions" ? (
+        ) : ongletActif === "suggestions" ? (
           <SuggestionsTab suggestions={suggestions} onAddCard={onAddCard} />
-        ) : onglet === "combos" ? (
+        ) : ongletActif === "combos" ? (
           <CombosTab combos={combos} />
         ) : (
           <MatchupsTab matchups={matchups} />
