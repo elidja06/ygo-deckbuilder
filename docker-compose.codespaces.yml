@@ -1,0 +1,23 @@
+# Surcharge pour GitHub Codespaces : le trafic entre conteneurs (réseau bridge)
+# peut y être bloqué (TimeoutError vers db:5432). Les services passent donc par
+# le réseau de la machine (localhost), la base restant joignable via son port publié.
+#
+# Usage :
+#   docker compose -f docker-compose.yml -f docker-compose.codespaces.yml up -d db api web
+#   docker compose -f docker-compose.yml -f docker-compose.codespaces.yml run --rm worker
+services:
+  api:
+    network_mode: host
+    ports: !reset null
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ygo:ygo@localhost:5432/ygo?ssl=disable
+  worker:
+    network_mode: host
+    dns: !reset null
+    environment:
+      DATABASE_URL: postgresql+asyncpg://ygo:ygo@localhost:5432/ygo?ssl=disable
+  web:
+    network_mode: host
+    ports: !reset null
+    environment:
+      API_INTERNAL_URL: http://localhost:8000
