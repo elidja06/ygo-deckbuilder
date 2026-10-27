@@ -79,6 +79,11 @@ def _raison_synergie(avec: list[tuple[int, float]], noms: dict[int, str]) -> str
     return texte + (f" (+{reste})" if reste > 0 else "")
 
 
+# Score minimal pour être suggérée : écarte les liens trop faibles (ex. cartes qui ne
+# font que citer un pivot comme Maxx "C", déjà atténuées par score_candidates).
+MIN_SYNERGY_SCORE = 0.5
+
+
 async def _synergies(
     session: AsyncSession,
     deck: set[int],
@@ -131,6 +136,8 @@ async def _synergies(
     out: list[dict] = []
     for pid, entry in classes:
         carte = cartes.get(pid)
+        if entry["score"] < MIN_SYNERGY_SCORE:
+            break  # `classes` est trié : toutes les suivantes sont encore plus faibles
         if carte is None or (md_seul and carte.md_rarity is None):
             continue
         status = effective_status(carte, fmt, overrides)
