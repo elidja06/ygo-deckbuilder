@@ -48,12 +48,12 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
 
   const signature = cardIds.join(",") + "|" + format;
 
-  // L'onglet Combos n'apparaît que s'il existe des combos pour l'archétype du deck.
+  // Combos et Matchups n'apparaissent que s'il existe des données pour l'archétype du deck.
   const onglets: Onglet[] = [
     "analyse",
     "suggestions",
     ...(combos.length > 0 ? (["combos"] as Onglet[]) : []),
-    "matchups",
+    ...(matchups.length > 0 ? (["matchups"] as Onglet[]) : []),
   ];
   const ongletActif: Onglet = onglets.includes(onglet) ? onglet : "analyse";
 
