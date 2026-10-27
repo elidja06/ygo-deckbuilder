@@ -136,6 +136,30 @@ def test_score_candidates_sums_over_deck_and_skips_deck_cards():
     assert max(r, key=lambda k: r[k]["score"]) == 10
 
 
+def test_hub_card_does_not_pull_in_whole_foreign_archetypes():
+    from engine.synergy import HUB_THRESHOLD, score_candidates
+
+    hub = 1  # Maxx "C" : sans archétype, citée par 30 cartes d'un autre archétype
+    citeurs = list(range(100, 100 + HUB_THRESHOLD * 2))
+    links = [(c, hub, "name", 1.0) for c in citeurs]
+    arch = {c: 9 for c in citeurs}
+    r = score_candidates([hub], links, arch, {})
+    assert all(v["score"] < 0.6 for v in r.values()), r[100]
+    # une carte qui cite peu (pas un pivot) garde son plein score
+    r = score_candidates([2], [(300, 2, "name", 1.0)], {}, {})
+    assert r[300]["score"] == 1.0
+
+
+def test_hub_does_not_dampen_same_archetype_citers():
+    from engine.synergy import HUB_THRESHOLD, score_candidates
+
+    # 30 cartes du MÊME archétype citent la carte du deck : pas un pivot
+    citeurs = list(range(100, 100 + HUB_THRESHOLD * 2))
+    links = [(c, 1, "name", 1.0) for c in citeurs]
+    r = score_candidates([1], links, {1: 9, **{c: 9 for c in citeurs}}, {9: [1] + citeurs})
+    assert all(v["score"] >= 1.0 for v in r.values())
+
+
 def test_score_candidates_empty():
     from engine.synergy import score_candidates
 

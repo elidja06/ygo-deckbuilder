@@ -27,6 +27,7 @@ MIN_FRAGMENT_LEN = 4      # ignore les fragments trop courts (« C », « Lv »�
 MAX_THEME_MATCHES = 80    # au-delà, le fragment est trop générique (« Dragon »…)
 WEIGHT_NAME = 1.0
 WEIGHT_THEME = 0.5
+HUB_THRESHOLD = 15        # citations externes au-delà desquelles une carte est un « pivot »
 
 
 def normalize(text: str) -> str:
@@ -183,7 +184,7 @@ def score_candidates(
 
     deck                 : identifiants des cartes du deck (doublons ignorés)
     links                : (source, cible, kind, poids) touchant au moins une carte du deck
-    archetype_of         : archétype de chaque carte du deck
+    archetype_of         : archétype des cartes du deck ET de celles qui les citent
     members_by_archetype : cartes de chaque archétype présent dans le deck
 
     Pour chaque carte du deck, on réutilise `score_partners` (même échelle que
@@ -192,6 +193,7 @@ def score_candidates(
     avec `avec` trié par score décroissant.
     """
     deck_set = set(deck)
+    links = list(links)
     sortants: dict[int, list] = {d: [] for d in deck_set}
     entrants: dict[int, list] = {d: [] for d in deck_set}
     for src, tgt, kind, weight in links:
@@ -204,9 +206,20 @@ def score_candidates(
     for d in deck_set:
         arch = archetype_of.get(d)
         meme = [i for i in members_by_archetype.get(arch, []) if i != d] if arch else []
+        # Carte « pivot » (Maxx "C"…) : citée par beaucoup de cartes d'AUTRES archétypes.
+        # Ces cartes ne prouvent rien sur leur archétype : on atténue celles qui se
+        # contentent de la citer (les liens mutuels ou d'archétype restent intacts).
+        externes = {
+            src
+            for src, kind, _ in entrants[d]
+            if kind == "name" and (arch is None or archetype_of.get(src) != arch)
+        }
+        facteur = min(1.0, HUB_THRESHOLD / len(externes)) if len(externes) > HUB_THRESHOLD else 1.0
         for pid, p in score_partners(sortants[d], entrants[d], meme).items():
             if pid in deck_set:
                 continue
+            if facteur < 1.0 and p["sens"] == {"cite_par"}:
+                p["score"] *= facteur
             entry = result.setdefault(pid, {"score": 0.0, "avec": []})
             entry["score"] += p["score"]
             entry["avec"].append((d, p["score"]))

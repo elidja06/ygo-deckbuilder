@@ -97,7 +97,16 @@ async def _synergies(
         await session.execute(select(Card.id, Card.nom_fr, Card.archetype_id).where(Card.id.in_(list(deck))))
     ).all()
     noms = {r.id: r.nom_fr for r in deck_rows}
-    archetype_of = {r.id: r.archetype_id for r in deck_rows}
+    # Archétype de toutes les cartes liées au deck (sert à repérer les cartes « pivot »).
+    concernees = {i for src, tgt, _, _ in liens for i in (src, tgt)} | deck
+    archetype_of = {
+        cid: aid
+        for cid, aid in (
+            await session.execute(
+                select(Card.id, Card.archetype_id).where(Card.id.in_(list(concernees)))
+            )
+        ).all()
+    }
     archetypes = {a for a in archetype_of.values() if a is not None}
     membres: dict[int, list[int]] = {}
     if archetypes:
