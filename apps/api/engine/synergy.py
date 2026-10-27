@@ -171,3 +171,46 @@ def describe_partner(p: dict) -> dict:
         "sens": sens,
         "memeArchetype": "archetype" in p["sens"],
     }
+
+
+def score_candidates(
+    deck: Iterable[int],
+    links: Iterable[tuple[int, int, str, float]],
+    archetype_of: dict[int, int | None],
+    members_by_archetype: dict[int, list[int]],
+) -> dict[int, dict]:
+    """Score les cartes HORS deck selon leur synergie avec l'ensemble du deck.
+
+    deck                 : identifiants des cartes du deck (doublons ignorés)
+    links                : (source, cible, kind, poids) touchant au moins une carte du deck
+    archetype_of         : archétype de chaque carte du deck
+    members_by_archetype : cartes de chaque archétype présent dans le deck
+
+    Pour chaque carte du deck, on réutilise `score_partners` (même échelle que
+    /cards/synergies) puis on additionne : une carte liée à plusieurs cartes du deck
+    remonte. Résultat : {candidat: {"score": total, "avec": [(carte_deck, score)…]}}
+    avec `avec` trié par score décroissant.
+    """
+    deck_set = set(deck)
+    sortants: dict[int, list] = {d: [] for d in deck_set}
+    entrants: dict[int, list] = {d: [] for d in deck_set}
+    for src, tgt, kind, weight in links:
+        if src in deck_set:
+            sortants[src].append((tgt, kind, weight))
+        if tgt in deck_set:
+            entrants[tgt].append((src, kind, weight))
+
+    result: dict[int, dict] = {}
+    for d in deck_set:
+        arch = archetype_of.get(d)
+        meme = [i for i in members_by_archetype.get(arch, []) if i != d] if arch else []
+        for pid, p in score_partners(sortants[d], entrants[d], meme).items():
+            if pid in deck_set:
+                continue
+            entry = result.setdefault(pid, {"score": 0.0, "avec": []})
+            entry["score"] += p["score"]
+            entry["avec"].append((d, p["score"]))
+    for entry in result.values():
+        entry["avec"].sort(key=lambda t: (-t[1], t[0]))
+        entry["score"] = round(entry["score"], 3)
+    return result

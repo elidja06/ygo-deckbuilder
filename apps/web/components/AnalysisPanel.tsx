@@ -25,6 +25,7 @@ interface Props {
 }
 
 const CATEGORIES: { id: Suggestion["categorie"]; label: string }[] = [
+  { id: "synergie", label: "Synergies" },
   { id: "staple", label: "Staples" },
   { id: "handtrap", label: "Hand Traps" },
   { id: "tech", label: "Tech Cards" },

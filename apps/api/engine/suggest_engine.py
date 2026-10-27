@@ -5,7 +5,8 @@ Analyse la composition du deck et renvoie trois familles de cartes, déjà filtr
 par la banlist du format (les cartes bannies sont écartées) :
   - "staple"   : incontournables du format ;
   - "handtrap" : hand traps, classées par pertinence ;
-  - "tech"     : cartes en synergie directe avec l'archétype dominant du deck.
+  - "tech"     : cartes en synergie directe avec l'archétype dominant du deck ;
+  - "synergie" : cartes les plus liées à l'ENSEMBLE du deck (graphe card_links).
 
 Les pools (`staples`, `hand_traps`, `tech_cards`) sont curés à la main : cela garantit
 des suggestions justes et contextualisées plutôt que génériques.
@@ -17,7 +18,9 @@ from collections import Counter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import Card, HandTrap, Staple, TechCard
+from db.models import Card, CardLink, HandTrap, Staple, TechCard
+from engine.mdcards import md_filter_active
+from engine.synergy import score_candidates
 from engine.banlist import (
     BanStatus,
     card_to_dict,
@@ -68,6 +71,70 @@ def _retenir(
     return out
 
 
+def _raison_synergie(avec: list[tuple[int, float]], noms: dict[int, str]) -> str:
+    """« Lié à A, B, C (+2) » : les trois cartes du deck les plus liées."""
+    cites = [noms[i] for i, _ in avec[:3] if i in noms]
+    reste = len(avec) - len(cites)
+    texte = "Lié à " + ", ".join(cites)
+    return texte + (f" (+{reste})" if reste > 0 else "")
+
+
+async def _synergies(
+    session: AsyncSession,
+    deck: set[int],
+    fmt: str,
+    overrides: dict[int, BanStatus],
+    limite: int,
+) -> list[dict]:
+    """Cartes hors deck, non bannies, classées par synergie cumulée avec le deck."""
+    liens = (
+        await session.execute(
+            select(CardLink.source_id, CardLink.target_id, CardLink.kind, CardLink.weight)
+            .where(CardLink.source_id.in_(list(deck)) | CardLink.target_id.in_(list(deck)))
+        )
+    ).all()
+    deck_rows = (
+        await session.execute(select(Card.id, Card.nom_fr, Card.archetype_id).where(Card.id.in_(list(deck))))
+    ).all()
+    noms = {r.id: r.nom_fr for r in deck_rows}
+    archetype_of = {r.id: r.archetype_id for r in deck_rows}
+    archetypes = {a for a in archetype_of.values() if a is not None}
+    membres: dict[int, list[int]] = {}
+    if archetypes:
+        for cid, aid in (
+            await session.execute(
+                select(Card.id, Card.archetype_id).where(Card.archetype_id.in_(archetypes))
+            )
+        ).all():
+            membres.setdefault(aid, []).append(cid)
+
+    scores = score_candidates(deck, liens, archetype_of, membres)
+    if not scores:
+        return []
+    classes = sorted(scores.items(), key=lambda kv: (-kv[1]["score"], kv[0]))[:200]
+    cartes = {
+        c.id: c
+        for c in (
+            await session.execute(select(Card).where(Card.id.in_([i for i, _ in classes])))
+        ).scalars()
+    }
+    md_seul = await md_filter_active(session, fmt)
+    out: list[dict] = []
+    for pid, entry in classes:
+        carte = cartes.get(pid)
+        if carte is None or (md_seul and carte.md_rarity is None):
+            continue
+        status = effective_status(carte, fmt, overrides)
+        if status == "banned":
+            continue
+        out.append(
+            _suggestion(carte, status, "synergie", _raison_synergie(entry["avec"], noms))
+        )
+        if len(out) >= limite:
+            break
+    return out
+
+
 async def suggest(
     session: AsyncSession, card_ids: list[int], fmt: str, limite_par_categorie: int = 6
 ) -> list[dict]:
@@ -80,6 +147,9 @@ async def suggest(
     dominant = await _dominant_archetype(session, deck)
 
     suggestions: list[dict] = []
+
+    # 0) Synergies avec l'ensemble du deck (plus d'items que les autres blocs)
+    suggestions += await _synergies(session, deck, fmt, overrides, limite_par_categorie + 6)
 
     # 1) Staples du format -------------------------------------------------
     staple_cards = (

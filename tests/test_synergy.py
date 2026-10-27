@@ -118,6 +118,30 @@ def test_no_signal_gives_empty():
     assert score_partners([], [], []) == {}
 
 
+def test_score_candidates_sums_over_deck_and_skips_deck_cards():
+    from engine.synergy import score_candidates
+
+    deck = [1, 2, 2]  # doublons ignorés
+    links = [
+        (1, 10, "name", 1.0),     # 1 cite 10
+        (10, 2, "name", 1.0),     # 10 cite 2 -> 10 lié aux deux cartes
+        (1, 11, "theme", 0.5),    # 11 : un seul lien faible
+        (1, 2, "name", 1.0),      # lien interne au deck : ignoré
+    ]
+    r = score_candidates(deck, links, {1: 7, 2: None}, {7: [1, 12]})
+    assert set(r) == {10, 11, 12}
+    assert r[10]["score"] == 2.0 and [d for d, _ in r[10]["avec"]] == [1, 2]
+    assert r[11]["score"] == 0.5
+    assert r[12]["score"] == 0.6 and r[12]["avec"] == [(1, 0.6)]
+    assert max(r, key=lambda k: r[k]["score"]) == 10
+
+
+def test_score_candidates_empty():
+    from engine.synergy import score_candidates
+
+    assert score_candidates([], [], {}, {}) == {}
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:

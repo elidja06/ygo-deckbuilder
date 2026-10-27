@@ -22,6 +22,7 @@ from db.database import get_session
 from db.models import Archetype, Card, CardLink, Matchup
 from engine.banlist import card_to_dict, effective_status, load_overrides
 from engine.combo_engine import generate_combos
+from engine.mdcards import md_filter_active
 from engine.suggest_engine import suggest
 from engine.synergy import describe_partner, score_partners
 
@@ -72,17 +73,7 @@ def _apply_type_filter(stmt, types: str | None):
 
 
 async def _md_only(session: AsyncSession, format: str) -> bool:
-    """Vrai si l'on doit masquer les cartes absentes de Master Duel.
-
-    Actif seulement en format Master Duel ET si worker/fetch_md_cards.py a déjà
-    renseigné la base (sinon toute la base serait masquée).
-    """
-    if format != "master_duel":
-        return False
-    row = await session.execute(
-        select(Card.id).where(Card.md_rarity.is_not(None)).limit(1)
-    )
-    return row.first() is not None
+    return await md_filter_active(session, format)
 
 
 async def _excluded_archetype_ids(session: AsyncSession) -> list[int]:

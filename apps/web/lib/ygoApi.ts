@@ -53,7 +53,7 @@ export interface Matchup {
 
 export interface Suggestion {
   card: Card;
-  categorie: "staple" | "handtrap" | "tech" | "extra";
+  categorie: "synergie" | "staple" | "handtrap" | "tech" | "extra";
   raison: string;
 }
 
