@@ -23,6 +23,7 @@ from db.models import Archetype, Card, CardLink, Matchup
 from engine.banlist import card_to_dict, effective_status, load_overrides
 from engine.combo_engine import generate_combos
 from engine.mdcards import md_filter_active
+from engine.roles import analyze_deck
 from engine.suggest_engine import suggest
 from engine.synergy import describe_partner, score_partners
 
@@ -240,6 +241,34 @@ async def suggest_endpoint(
     body: DeckBody, session: AsyncSession = Depends(get_session)
 ) -> list[dict]:
     return await suggest(session, body.cardIds, body.format)
+
+
+# ------------------------- Analyse du deck (rôles) -------------------------- #
+@app.post("/deck/analyze")
+async def deck_analyze(
+    body: DeckBody, session: AsyncSession = Depends(get_session)
+) -> dict:
+    """Rôles des cartes du Main Deck (`cardIds` : un identifiant par exemplaire)."""
+    if not body.cardIds:
+        return {"total": 0, "roles": [], "alertes": []}
+    rows = {
+        c.id: c
+        for c in (
+            await session.execute(select(Card).where(Card.id.in_(set(body.cardIds))))
+        ).scalars()
+    }
+    cartes = [
+        {
+            "id": cid,
+            "nom": rows[cid].nom_fr,
+            "frame_type": rows[cid].frame_type,
+            "niveau": rows[cid].niveau_rang_link,
+            "texte": rows[cid].effet_fr,
+        }
+        for cid in body.cardIds
+        if cid in rows
+    ]
+    return analyze_deck(cartes)
 
 
 # -------------------------------- Matchups --------------------------------- #

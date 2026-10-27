@@ -51,6 +51,17 @@ export interface Matchup {
   conseilFr: string;
 }
 
+export interface DeckAnalysis {
+  total: number;
+  roles: {
+    role: string;
+    label: string;
+    copies: number;
+    cartes: { id: number; nom: string; copies: number }[];
+  }[];
+  alertes: { niveau: "attention" | "info" | "ok"; message: string }[];
+}
+
 export interface Suggestion {
   card: Card;
   categorie: "synergie" | "staple" | "handtrap" | "tech" | "extra";
@@ -105,3 +116,6 @@ export const getMatchups = (archetypeId: number) =>
 
 export const fetchMatchupsForDeck = (cardIds: number[], format: Format) =>
   post<Matchup[]>("/meta/matchups/by-deck", { cardIds, format });
+
+export const analyzeDeck = (cardIds: number[], format: Format) =>
+  post<DeckAnalysis>("/deck/analyze", { cardIds, format });

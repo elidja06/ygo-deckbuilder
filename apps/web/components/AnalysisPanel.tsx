@@ -3,8 +3,9 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import type { Card, Combo, Format, Matchup, Suggestion } from "@/lib/ygoApi";
+import type { Card, Combo, DeckAnalysis, Format, Matchup, Suggestion } from "@/lib/ygoApi";
 import {
+  analyzeDeck,
   fetchMatchupsForDeck,
   generateCombos,
   suggestCards,
@@ -16,7 +17,7 @@ const ComboFlowchart = dynamic(() => import("@/components/ComboFlowchart"), {
   loading: () => <p className="p-4 text-xs text-[#8a8aa0]">Chargement du schéma…</p>,
 });
 
-type Onglet = "suggestions" | "combos" | "matchups";
+type Onglet = "analyse" | "suggestions" | "combos" | "matchups";
 
 interface Props {
   cardIds: number[];
@@ -38,10 +39,11 @@ const FAVEUR_STYLE: Record<Matchup["faveur"], { dot: string; texte: string; labe
 };
 
 export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
-  const [onglet, setOnglet] = useState<Onglet>("suggestions");
+  const [onglet, setOnglet] = useState<Onglet>("analyse");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [combos, setCombos] = useState<Combo[]>([]);
   const [matchups, setMatchups] = useState<Matchup[]>([]);
+  const [analyse, setAnalyse] = useState<DeckAnalysis | null>(null);
   const [chargement, setChargement] = useState(false);
 
   const signature = cardIds.join(",") + "|" + format;
@@ -49,6 +51,7 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
   // Recalcul à chaque modification du deck (anti-rebond 450 ms).
   useEffect(() => {
     if (cardIds.length === 0) {
+      setAnalyse(null);
       setSuggestions([]);
       setCombos([]);
       setMatchups([]);
@@ -57,11 +60,13 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
     const t = setTimeout(async () => {
       setChargement(true);
       try {
-        const [s, c, m] = await Promise.all([
+        const [a, s, c, m] = await Promise.all([
+          analyzeDeck(cardIds, format),
           suggestCards(cardIds, format),
           generateCombos(cardIds, format),
           fetchMatchupsForDeck(cardIds, format),
         ]);
+        setAnalyse(a);
         setSuggestions(s);
         setCombos(c);
         setMatchups(m);
@@ -79,17 +84,23 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
     <div className="flex h-full flex-col bg-[#12121a]">
       {/* Onglets */}
       <div className="flex border-b border-[#262633]">
-        {(["suggestions", "combos", "matchups"] as Onglet[]).map((o) => (
+        {(["analyse", "suggestions", "combos", "matchups"] as Onglet[]).map((o) => (
           <button
             key={o}
             onClick={() => setOnglet(o)}
-            className={`flex-1 px-3 py-2.5 font-display text-xs uppercase tracking-wider transition-colors ${
+            className={`flex-1 px-2 py-2.5 font-display text-[11px] uppercase tracking-wider transition-colors ${
               onglet === o
                 ? "border-b-2 border-[#22d3ee] text-[#22d3ee]"
                 : "text-[#8a8aa0] hover:text-[#e6e6ef]"
             }`}
           >
-            {o === "suggestions" ? "Suggestions" : o === "combos" ? "Combos" : "Matchups"}
+            {o === "analyse"
+              ? "Analyse"
+              : o === "suggestions"
+                ? "Suggestions"
+                : o === "combos"
+                  ? "Combos"
+                  : "Matchups"}
           </button>
         ))}
       </div>
@@ -104,6 +115,8 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
           <p className="mt-8 text-center text-xs text-[#8a8aa0]">
             Ajoutez des cartes au Main Deck pour lancer l'analyse.
           </p>
+        ) : onglet === "analyse" ? (
+          <AnalyseTab analyse={analyse} />
         ) : onglet === "suggestions" ? (
           <SuggestionsTab suggestions={suggestions} onAddCard={onAddCard} />
         ) : onglet === "combos" ? (
@@ -112,6 +125,58 @@ export default function AnalysisPanel({ cardIds, format, onAddCard }: Props) {
           <MatchupsTab matchups={matchups} />
         )}
       </div>
+    </div>
+  );
+}
+
+// ------------------------------- Analyse ---------------------------------- //
+const ALERTE_STYLE: Record<DeckAnalysis["alertes"][number]["niveau"], { couleur: string; icone: string }> = {
+  attention: { couleur: "#ffb020", icone: "!" },
+  info: { couleur: "#22d3ee", icone: "i" },
+  ok: { couleur: "#36d399", icone: "✓" },
+};
+
+function AnalyseTab({ analyse }: { analyse: DeckAnalysis | null }) {
+  if (!analyse) return <p className="text-xs text-[#8a8aa0]">Analyse en cours…</p>;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-[11px] text-[#8a8aa0]">
+        Main Deck : <b className="text-[#e6e6ef]">{analyse.total}</b> cartes. Rôles déduits du
+        texte des effets (indicatif : une carte peut avoir plusieurs rôles).
+      </p>
+
+      {analyse.alertes.length > 0 && (
+        <div className="space-y-1.5">
+          {analyse.alertes.map((a, i) => {
+            const st = ALERTE_STYLE[a.niveau];
+            return (
+              <div
+                key={i}
+                className="flex gap-2 rounded-md border bg-[#1a1a24] p-2 text-[12px] leading-snug text-[#b9b9cc]"
+                style={{ borderColor: st.couleur + "66" }}
+              >
+                <span className="font-bold" style={{ color: st.couleur }}>
+                  {st.icone}
+                </span>
+                <span>{a.message}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {analyse.roles.map((r) => (
+        <section key={r.role}>
+          <h3 className="mb-1.5 flex items-baseline justify-between font-display text-[11px] uppercase tracking-widest text-[#22d3ee]">
+            <span>{r.label}</span>
+            <span className="text-[#e6e6ef]">{r.copies}</span>
+          </h3>
+          <p className="text-[12px] leading-relaxed text-[#b9b9cc]">
+            {r.cartes.map((c) => (c.copies > 1 ? `${c.nom} ×${c.copies}` : c.nom)).join(" · ")}
+          </p>
+        </section>
+      ))}
     </div>
   );
 }
