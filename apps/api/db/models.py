@@ -15,6 +15,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     SmallInteger,
@@ -175,6 +176,24 @@ class TechCard(Base):
     card_id: Mapped[int] = mapped_column(ForeignKey("cards.id"), nullable=False)
     archetype_id: Mapped[int] = mapped_column(ForeignKey("archetypes.id"), nullable=False)
     raison: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class CardLink(Base):
+    """Arête du graphe de synergie : `source` cite `target` dans son effet.
+
+    Calculée par worker/build_synergy.py (voir engine/synergy.py).
+    kind = "name" (carte citée explicitement) | "theme" (archétype / fragment de nom).
+    """
+    __tablename__ = "card_links"
+
+    source_id: Mapped[int] = mapped_column(
+        ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True
+    )
+    target_id: Mapped[int] = mapped_column(
+        ForeignKey("cards.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    weight: Mapped[float] = mapped_column(Float, nullable=False)
 
 
 class SyncState(Base):

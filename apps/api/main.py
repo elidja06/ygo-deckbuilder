@@ -19,7 +19,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_session
-from db.models import Archetype, Card, Matchup
+from db.models import Archetype, Card, CardLink, Matchup
 from engine.banlist import card_to_dict, effective_status, load_overrides
 from engine.combo_engine import generate_combos
 from engine.suggest_engine import suggest
@@ -130,6 +130,74 @@ async def cards_by_archetype(
         )
     ).scalars().all()
     return [card_to_dict(c, effective_status(c, format, overrides)) for c in cards]
+
+
+# ------------------------- Synergies (graphe de cartes) --------------------- #
+@app.get("/cards/synergies")
+async def card_synergies(
+    card_id: int,
+    format: Format = "master_duel",
+    limit: int = 40,
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    """Cartes qui travaillent avec `card_id` (citées par son effet, ou la citant).
+
+    Score = poids du meilleur lien (1.0 = nom cité, 0.5 = thème), +0.25 si le lien
+    existe dans les deux sens. Le graphe est construit par worker/build_synergy.py.
+    """
+    sortants = (
+        await session.execute(
+            select(CardLink.target_id, CardLink.kind, CardLink.weight).where(
+                CardLink.source_id == card_id
+            )
+        )
+    ).all()
+    entrants = (
+        await session.execute(
+            select(CardLink.source_id, CardLink.kind, CardLink.weight).where(
+                CardLink.target_id == card_id
+            )
+        )
+    ).all()
+
+    partenaires: dict[int, dict] = {}
+    for sens, rows in (("cite", sortants), ("cite_par", entrants)):
+        for pid, kind, weight in rows:
+            p = partenaires.setdefault(
+                pid, {"score": 0.0, "kind": kind, "sens": set()}
+            )
+            p["sens"].add(sens)
+            if weight > p["score"]:
+                p["score"], p["kind"] = weight, kind
+    for p in partenaires.values():
+        if len(p["sens"]) == 2:
+            p["score"] += 0.25
+
+    top = sorted(partenaires.items(), key=lambda kv: (-kv[1]["score"], kv[0]))
+    top = top[: max(1, min(limit, 100))]
+    if not top:
+        return []
+
+    cartes = {
+        c.id: c
+        for c in (
+            await session.execute(select(Card).where(Card.id.in_([i for i, _ in top])))
+        ).scalars()
+    }
+    overrides = await load_overrides(session, format)
+    resultat: list[dict] = []
+    for pid, p in top:
+        carte = cartes.get(pid)
+        if carte is None:
+            continue
+        d = card_to_dict(carte, effective_status(carte, format, overrides))
+        d["synergie"] = {
+            "score": round(p["score"], 2),
+            "kind": p["kind"],
+            "sens": "mutuel" if len(p["sens"]) == 2 else next(iter(p["sens"])),
+        }
+        resultat.append(d)
+    return resultat
 
 
 # -------------------------------- Combos ----------------------------------- #
