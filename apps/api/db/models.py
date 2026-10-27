@@ -57,6 +57,9 @@ class Card(Base):
     effet_fr: Mapped[str | None] = mapped_column(Text)
     image_locale: Mapped[str | None] = mapped_column(Text)
     langue: Mapped[str | None] = mapped_column(String(2), default="fr")
+    # Rareté dans Master Duel (Common/Rare/...) ; NULL = carte absente de Master Duel.
+    # Remplie par worker/fetch_md_cards.py.
+    md_rarity: Mapped[str | None] = mapped_column(String(16))
     # Statut de banlist API, normalisé (banned/limited/semi_limited) ou NULL.
     ban_tcg: Mapped[str | None] = mapped_column(String(16))
     ban_ocg: Mapped[str | None] = mapped_column(String(16))

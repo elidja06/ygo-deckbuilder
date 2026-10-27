@@ -41,3 +41,6 @@ CREATE TABLE IF NOT EXISTS sync_state (
     last_db_version  VARCHAR(64),
     synced_at        TIMESTAMPTZ
 );
+
+-- 4) Présence dans Master Duel (worker/fetch_md_cards.py) : NULL = absente.
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS md_rarity VARCHAR(16);

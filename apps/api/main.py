@@ -71,6 +71,20 @@ def _apply_type_filter(stmt, types: str | None):
     return stmt.where(or_(*[Card.frame_type.ilike(f"%{m}%") for m in motifs]))
 
 
+async def _md_only(session: AsyncSession, format: str) -> bool:
+    """Vrai si l'on doit masquer les cartes absentes de Master Duel.
+
+    Actif seulement en format Master Duel ET si worker/fetch_md_cards.py a déjà
+    renseigné la base (sinon toute la base serait masquée).
+    """
+    if format != "master_duel":
+        return False
+    row = await session.execute(
+        select(Card.id).where(Card.md_rarity.is_not(None)).limit(1)
+    )
+    return row.first() is not None
+
+
 async def _excluded_archetype_ids(session: AsyncSession) -> list[int]:
     if not EXCLUDED_ARCHETYPES:
         return []
@@ -102,6 +116,8 @@ async def cards_search(
         stmt = stmt.where(
             or_(Card.archetype_id.is_(None), Card.archetype_id.not_in(exclus))
         )
+    if await _md_only(session, format):
+        stmt = stmt.where(Card.md_rarity.is_not(None))
     stmt = _apply_type_filter(stmt, types)
     # Les cartes dont le nom COMMENCE par la recherche remontent en premier.
     stmt = stmt.order_by(
@@ -128,13 +144,11 @@ async def cards_by_archetype(
     if carte is None or carte.archetype_id is None:
         return []
     overrides = await load_overrides(session, format)
+    stmt = select(Card).where(Card.archetype_id == carte.archetype_id)
+    if await _md_only(session, format):
+        stmt = stmt.where(Card.md_rarity.is_not(None))
     cards = (
-        await session.execute(
-            select(Card)
-            .where(Card.archetype_id == carte.archetype_id)
-            .order_by(Card.frame_type, Card.nom_fr)
-            .limit(300)
-        )
+        await session.execute(stmt.order_by(Card.frame_type, Card.nom_fr).limit(300))
     ).scalars().all()
     return [card_to_dict(c, effective_status(c, format, overrides)) for c in cards]
 
@@ -186,6 +200,17 @@ async def card_synergies(
         )
 
     partenaires = score_partners(sortants, entrants, meme_archetype)
+    if partenaires and await _md_only(session, format):
+        presents = set(
+            (
+                await session.execute(
+                    select(Card.id).where(
+                        Card.id.in_(list(partenaires)), Card.md_rarity.is_not(None)
+                    )
+                )
+            ).scalars()
+        )
+        partenaires = {i: p for i, p in partenaires.items() if i in presents}
 
     top = sorted(partenaires.items(), key=lambda kv: (-kv[1]["score"], kv[0]))
     top = top[: max(1, min(limit, 100))]
