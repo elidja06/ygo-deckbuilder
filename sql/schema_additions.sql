@@ -9,6 +9,10 @@ ALTER TABLE cards ADD COLUMN IF NOT EXISTS ban_ocg VARCHAR(16);
 -- 1b) Langue de la carte : 'fr' (traduite) ou 'en' (non traduite, vignette EN).
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS langue VARCHAR(2) DEFAULT 'fr';
 
+-- 1c) Nom anglais (recherche en anglais) + index de recherche floue.
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS nom_en TEXT;
+CREATE INDEX IF NOT EXISTS idx_cards_nom_en_trgm ON cards USING gin (nom_en gin_trgm_ops);
+
 -- 2) Pools de suggestion (à pré-remplir à la main).
 CREATE TABLE IF NOT EXISTS staples (
     id       SERIAL PRIMARY KEY,

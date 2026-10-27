@@ -31,8 +31,20 @@ async def run() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with SessionLocal() as session:
-        rows = (await session.execute(select(Card.id, Card.nom_fr, Card.effet_fr))).all()
-    cards = [{"id": r.id, "name": r.nom_fr, "text": r.effet_fr or ""} for r in rows]
+        rows = (
+            await session.execute(
+                select(Card.id, Card.nom_fr, Card.nom_en, Card.effet_fr)
+            )
+        ).all()
+    cards = [
+        {
+            "id": r.id,
+            "name": r.nom_fr,
+            "alt_names": [r.nom_en] if r.nom_en else [],
+            "text": r.effet_fr or "",
+        }
+        for r in rows
+    ]
     print(f"[synergy] {len(cards)} cartes lues.")
 
     edges = build_edges(cards)

@@ -48,12 +48,24 @@ def extract_quoted(text: str | None) -> list[str]:
 
 
 def build_edges(cards: Iterable[dict]) -> list[dict]:
-    """cards : dicts {"id", "name", "text"} -> arêtes {"source_id","target_id","kind","weight"}."""
+    """cards : dicts {"id", "name", "text", "alt_names"?} -> arêtes
+    {"source_id","target_id","kind","weight"}.
+
+    `alt_names` (ex. le nom anglais) sert aussi à reconnaître les citations : un texte
+    anglais cite « Vanquish Soul » même si la carte s'appelle désormais « Âme du
+    Vainqueur … ».
+    """
     cards = list(cards)
-    names = [(normalize(c["name"]), int(c["id"])) for c in cards]
+    names: list[tuple[str, int]] = []
+    for c in cards:
+        for form in [c["name"], *c.get("alt_names", [])]:
+            if form:
+                names.append((normalize(form), int(c["id"])))
     exact: dict[str, list[int]] = {}
     for n, cid in names:
-        exact.setdefault(n, []).append(cid)
+        ids = exact.setdefault(n, [])
+        if cid not in ids:
+            ids.append(cid)
 
     cited = {int(c["id"]): extract_quoted(c.get("text")) for c in cards}
 
@@ -63,7 +75,7 @@ def build_edges(cards: Iterable[dict]) -> list[dict]:
         for f in frags:
             if len(f) < MIN_FRAGMENT_LEN or f in fragment_matches:
                 continue
-            fragment_matches[f] = [cid for n, cid in names if f in n]
+            fragment_matches[f] = sorted({cid for n, cid in names if f in n})
 
     best: dict[tuple[int, int], tuple[float, str]] = {}
 

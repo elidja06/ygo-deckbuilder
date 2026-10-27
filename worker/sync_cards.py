@@ -67,15 +67,18 @@ async def fetch_dump(client: httpx.AsyncClient, language: str | None) -> list[di
 
 def merge_dumps(fr: list[dict], en: list[dict]) -> list[dict]:
     """Garde toutes les cartes FR, complète avec les EN absentes du FR."""
+    en_by_id = {int(c["id"]): c for c in en}
     fusion: dict[int, dict] = {}
     for c in fr:
         c["_langue"] = "fr"
+        c["_name_en"] = en_by_id.get(int(c["id"]), c)["name"]
         fusion[int(c["id"])] = c
     ajouts = 0
     for c in en:
         cid = int(c["id"])
         if cid not in fusion:
             c["_langue"] = "en"
+            c["_name_en"] = c["name"]
             fusion[cid] = c
             ajouts += 1
     print(f"[sync] {len(fr)} cartes FR + {ajouts} cartes EN complémentaires")
@@ -95,6 +98,7 @@ def parse_card(raw: dict, archetype_id: int | None) -> dict:
         "id": cid,
         "archetype_id": archetype_id,
         "nom_fr": raw["name"],
+        "nom_en": raw.get("_name_en", raw["name"]),
         "type": raw["type"],
         "frame_type": raw.get("frameType"),
         "attribut": raw.get("attribute"),
@@ -131,7 +135,7 @@ async def upsert_archetypes(cards_raw: list[dict]) -> dict[str, int]:
 async def upsert_cards(cards_raw: list[dict], arch_map: dict[str, int]) -> None:
     rows = [parse_card(c, arch_map.get(c.get("archetype"))) for c in cards_raw]
     updatable = [
-        "archetype_id", "nom_fr", "type", "frame_type", "attribut", "race",
+        "archetype_id", "nom_fr", "nom_en", "type", "frame_type", "attribut", "race",
         "niveau_rang_link", "atk", "def", "effet_fr", "image_locale",
         "langue", "ban_tcg", "ban_ocg",
     ]

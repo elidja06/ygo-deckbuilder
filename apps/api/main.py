@@ -15,7 +15,7 @@ from typing import Literal
 from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.database import get_session
@@ -91,11 +91,13 @@ async def cards_search(
     limit: int = 120,
     session: AsyncSession = Depends(get_session),
 ) -> list[dict]:
-    """Recherche par nom FR. `types` filtre la nature (spell,trap,fusion,...)."""
+    """Recherche par nom FR ou EN. `types` filtre la nature (spell,trap,fusion,...)."""
     overrides = await load_overrides(session, format)
     exclus = await _excluded_archetype_ids(session)
 
-    stmt = select(Card).where(Card.nom_fr.ilike(f"%{q}%"))
+    stmt = select(Card).where(
+        or_(Card.nom_fr.ilike(f"%{q}%"), Card.nom_en.ilike(f"%{q}%"))
+    )
     if exclus:
         stmt = stmt.where(
             or_(Card.archetype_id.is_(None), Card.archetype_id.not_in(exclus))
@@ -103,7 +105,11 @@ async def cards_search(
     stmt = _apply_type_filter(stmt, types)
     # Les cartes dont le nom COMMENCE par la recherche remontent en premier.
     stmt = stmt.order_by(
-        Card.nom_fr.ilike(f"{q}%").desc(), Card.nom_fr
+        or_(
+            Card.nom_fr.ilike(f"{q}%"),
+            func.coalesce(Card.nom_en, "").ilike(f"{q}%"),
+        ).desc(),
+        Card.nom_fr,
     ).limit(max(1, min(limit, 300)))
 
     cards = (await session.execute(stmt)).scalars().all()

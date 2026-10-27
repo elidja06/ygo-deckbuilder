@@ -43,6 +43,9 @@ class Card(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # passcode 8 chiffres
     archetype_id: Mapped[int | None] = mapped_column(ForeignKey("archetypes.id"))
     nom_fr: Mapped[str] = mapped_column(Text, nullable=False)
+    # Nom anglais officiel : permet de chercher en anglais (colonne ajoutée par
+    # worker/fetch_fr_names.py ou sql/schema_additions.sql).
+    nom_en: Mapped[str | None] = mapped_column(Text)
     type: Mapped[str] = mapped_column(Text, nullable=False)
     frame_type: Mapped[str | None] = mapped_column(Text)
     attribut: Mapped[str | None] = mapped_column(Text)

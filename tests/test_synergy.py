@@ -70,6 +70,21 @@ def test_no_citation_no_edge():
     assert not any(e["source_id"] == 5 for e in build_edges(CARDS))
 
 
+def test_alt_names_let_english_text_link_french_named_cards():
+    # Cartes renommées en français, texte resté anglais : le nom anglais sert de repli.
+    cards = [
+        {"id": 1, "name": "Loup du Ciel Alpha", "alt_names": ["Sky Wolf Alpha"],
+         "text": 'Add 1 "Sky Wolf" monster from your Deck to your hand.'},
+        {"id": 2, "name": "Loup du Ciel Beta", "alt_names": ["Sky Wolf Beta"],
+         "text": 'Banish "Sky Wolf Alpha" from your GY.'},
+        {"id": 3, "name": "Loup du Ciel Gamma", "alt_names": ["Sky Wolf Gamma"], "text": ""},
+    ]
+    e = edges_by_pair(build_edges(cards))
+    assert e[(2, 1)]["kind"] == "name"        # nom anglais exact
+    assert e[(1, 2)]["kind"] == "theme" and e[(1, 3)]["kind"] == "theme"
+    assert len([k for k in e if k[0] == 1]) == 2   # pas de doublons malgré 2 formes de nom
+
+
 def test_score_order_name_mutual_archetype_theme():
     from engine.synergy import describe_partner, score_partners
 
