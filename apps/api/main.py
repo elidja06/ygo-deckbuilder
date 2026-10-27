@@ -23,6 +23,7 @@ from db.models import Archetype, Card, CardLink, Matchup
 from engine.banlist import card_to_dict, effective_status, load_overrides
 from engine.combo_engine import generate_combos
 from engine.suggest_engine import suggest
+from engine.synergy import describe_partner, score_partners
 
 Format = Literal["advanced", "traditional", "speed_duel", "master_duel"]
 
@@ -142,8 +143,10 @@ async def card_synergies(
 ) -> list[dict]:
     """Cartes qui travaillent avec `card_id` (citées par son effet, ou la citant).
 
-    Score = poids du meilleur lien (1.0 = nom cité, 0.5 = thème), +0.25 si le lien
-    existe dans les deux sens. Le graphe est construit par worker/build_synergy.py.
+    Ordre des scores : nom cité (1.0, +0.25 si mutuel) > thème mutuel (0.75) >
+    même archétype (0.6) > simple citation de thème (0.5) ; un lien textuel cumulé
+    avec le même archétype gagne +0.1. Voir engine/synergy.py (score_partners).
+    Le graphe est construit par worker/build_synergy.py.
     """
     sortants = (
         await session.execute(
@@ -160,18 +163,23 @@ async def card_synergies(
         )
     ).all()
 
-    partenaires: dict[int, dict] = {}
-    for sens, rows in (("cite", sortants), ("cite_par", entrants)):
-        for pid, kind, weight in rows:
-            p = partenaires.setdefault(
-                pid, {"score": 0.0, "kind": kind, "sens": set()}
-            )
-            p["sens"].add(sens)
-            if weight > p["score"]:
-                p["score"], p["kind"] = weight, kind
-    for p in partenaires.values():
-        if len(p["sens"]) == 2:
-            p["score"] += 0.25
+    carte_source = await session.get(Card, card_id)
+    meme_archetype: list[int] = []
+    if carte_source is not None and carte_source.archetype_id is not None:
+        meme_archetype = list(
+            (
+                await session.execute(
+                    select(Card.id)
+                    .where(
+                        Card.archetype_id == carte_source.archetype_id,
+                        Card.id != card_id,
+                    )
+                    .limit(300)
+                )
+            ).scalars()
+        )
+
+    partenaires = score_partners(sortants, entrants, meme_archetype)
 
     top = sorted(partenaires.items(), key=lambda kv: (-kv[1]["score"], kv[0]))
     top = top[: max(1, min(limit, 100))]
@@ -191,11 +199,7 @@ async def card_synergies(
         if carte is None:
             continue
         d = card_to_dict(carte, effective_status(carte, format, overrides))
-        d["synergie"] = {
-            "score": round(p["score"], 2),
-            "kind": p["kind"],
-            "sens": "mutuel" if len(p["sens"]) == 2 else next(iter(p["sens"])),
-        }
+        d["synergie"] = describe_partner(p)
         resultat.append(d)
     return resultat
 

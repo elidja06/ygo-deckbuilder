@@ -91,3 +91,71 @@ def build_edges(cards: Iterable[dict]) -> list[dict]:
         {"source_id": s, "target_id": t, "kind": k, "weight": w}
         for (s, t), (w, k) in best.items()
     ]
+
+
+# --------------------------------------------------------------------------- #
+#  Score de synergie d'une carte avec ses partenaires                          #
+# --------------------------------------------------------------------------- #
+ARCHETYPE_WEIGHT = 0.6   # même archétype, sans lien textuel
+MUTUAL_BONUS = 0.25      # le lien existe dans les deux sens
+ARCHETYPE_BONUS = 0.1    # lien textuel ET même archétype
+
+
+def score_partners(
+    sortants: Iterable[tuple[int, str, float]],
+    entrants: Iterable[tuple[int, str, float]],
+    meme_archetype: Iterable[int],
+) -> dict[int, dict]:
+    """Agrège les signaux de synergie autour d'une carte.
+
+    sortants  : (partenaire, kind, poids) pour les liens que la carte émet
+    entrants  : idem pour les liens que le partenaire émet vers la carte
+    meme_archetype : identifiants des autres cartes du même archétype
+
+    Ordre de priorité des scores : nom cité (1.0+) > mutuel (0.75) >
+    même archétype (0.6) > simple citation de thème (0.5). Un lien textuel
+    cumulé avec le même archétype gagne +0.1.
+    """
+    partners: dict[int, dict] = {}
+    for sens, rows in (("cite", sortants), ("cite_par", entrants)):
+        for pid, kind, weight in rows:
+            p = partners.setdefault(pid, {"score": 0.0, "kind": kind, "sens": set()})
+            p["sens"].add(sens)
+            if weight > p["score"]:
+                p["score"], p["kind"] = weight, kind
+
+    for p in partners.values():
+        if {"cite", "cite_par"} <= p["sens"]:
+            p["score"] += MUTUAL_BONUS
+
+    for pid in meme_archetype:
+        p = partners.get(pid)
+        if p is None:
+            partners[pid] = {
+                "score": ARCHETYPE_WEIGHT,
+                "kind": "archetype",
+                "sens": {"archetype"},
+            }
+        else:
+            p["sens"].add("archetype")
+            p["score"] = max(p["score"], ARCHETYPE_WEIGHT) + ARCHETYPE_BONUS
+            if p["kind"] != "name":
+                p["kind"] = "archetype"
+    return partners
+
+
+def describe_partner(p: dict) -> dict:
+    """Version sérialisable d'une entrée de score_partners (pour l'API)."""
+    texte = p["sens"] & {"cite", "cite_par"}
+    if len(texte) == 2:
+        sens = "mutuel"
+    elif texte:
+        sens = next(iter(texte))
+    else:
+        sens = "archetype"
+    return {
+        "score": round(p["score"], 2),
+        "kind": p["kind"],
+        "sens": sens,
+        "memeArchetype": "archetype" in p["sens"],
+    }

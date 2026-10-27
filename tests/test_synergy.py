@@ -70,6 +70,39 @@ def test_no_citation_no_edge():
     assert not any(e["source_id"] == 5 for e in build_edges(CARDS))
 
 
+def test_score_order_name_mutual_archetype_theme():
+    from engine.synergy import describe_partner, score_partners
+
+    sortants = [(10, "name", 1.0), (11, "theme", 0.5), (12, "theme", 0.5)]
+    entrants = [(10, "name", 1.0), (11, "theme", 0.5), (13, "theme", 0.5)]
+    # 20 : même archétype seulement ; 12 : cité par la carte (thème) ; 13 : la cite (thème)
+    p = score_partners(sortants, entrants, [20])
+    s = {pid: describe_partner(v) for pid, v in p.items()}
+    assert s[10]["score"] == 1.25 and s[10]["sens"] == "mutuel"      # nom cité, mutuel
+    assert s[11]["score"] == 0.75 and s[11]["sens"] == "mutuel"      # thème mutuel
+    assert s[20]["score"] == 0.6 and s[20]["sens"] == "archetype"    # archétype seul
+    assert s[12]["score"] == 0.5 and s[13]["score"] == 0.5           # thème simple
+    ordre = sorted(s, key=lambda k: -s[k]["score"])
+    assert ordre[:3] == [10, 11, 20]
+
+
+def test_text_link_plus_archetype_gets_bonus_and_keeps_name_kind():
+    from engine.synergy import describe_partner, score_partners
+
+    p = score_partners([(1, "theme", 0.5)], [], [1, 2])
+    d1, d2 = describe_partner(p[1]), describe_partner(p[2])
+    assert d1["score"] == 0.7 and d1["memeArchetype"] is True and d1["kind"] == "archetype"
+    assert d2["score"] == 0.6 and d2["sens"] == "archetype"
+    p = score_partners([(1, "name", 1.0)], [], [1])
+    assert describe_partner(p[1])["kind"] == "name"
+
+
+def test_no_signal_gives_empty():
+    from engine.synergy import score_partners
+
+    assert score_partners([], [], []) == {}
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
