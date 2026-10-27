@@ -1,1 +1,5 @@
 apps/web/public/cards/
+
+# Python
+__pycache__/
+*.pyc
