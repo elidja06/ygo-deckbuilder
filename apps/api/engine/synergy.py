@@ -27,6 +27,7 @@ MIN_FRAGMENT_LEN = 4      # ignore les fragments trop courts (« C », « Lv »�
 MAX_THEME_MATCHES = 80    # au-delà, le fragment est trop générique (« Dragon »…)
 WEIGHT_NAME = 1.0
 WEIGHT_THEME = 0.5
+MIN_ARCHETYPE_DECK_CARDS = 2  # cartes du deck requises pour activer le lien d'archétype
 HUB_THRESHOLD = 15        # citations externes au-delà desquelles une carte est un « pivot »
 
 
@@ -202,10 +203,19 @@ def score_candidates(
         if tgt in deck_set:
             entrants[tgt].append((src, kind, weight))
 
+    # Un archétype n'est « joué » que s'il a au moins MIN_ARCHETYPE_DECK_CARDS cartes
+    # distinctes dans le deck : un Maxx "C" isolé ne rattache pas toute sa famille.
+    par_archetype: dict[int, int] = {}
+    for d in deck_set:
+        a = archetype_of.get(d)
+        if a is not None:
+            par_archetype[a] = par_archetype.get(a, 0) + 1
+
     result: dict[int, dict] = {}
     for d in deck_set:
         arch = archetype_of.get(d)
-        meme = [i for i in members_by_archetype.get(arch, []) if i != d] if arch else []
+        joue = arch is not None and par_archetype.get(arch, 0) >= MIN_ARCHETYPE_DECK_CARDS
+        meme = [i for i in members_by_archetype.get(arch, []) if i != d] if joue else []
         # Carte « pivot » (Maxx "C"…) : citée par beaucoup de cartes d'AUTRES archétypes.
         # Ces cartes ne prouvent rien sur leur archétype : on atténue celles qui se
         # contentent de la citer (les liens mutuels ou d'archétype restent intacts).

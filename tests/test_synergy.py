@@ -121,18 +121,18 @@ def test_no_signal_gives_empty():
 def test_score_candidates_sums_over_deck_and_skips_deck_cards():
     from engine.synergy import score_candidates
 
-    deck = [1, 2, 2]  # doublons ignorés
+    deck = [1, 2, 2, 3]  # doublons ignorés
     links = [
         (1, 10, "name", 1.0),     # 1 cite 10
         (10, 2, "name", 1.0),     # 10 cite 2 -> 10 lié aux deux cartes
         (1, 11, "theme", 0.5),    # 11 : un seul lien faible
         (1, 2, "name", 1.0),      # lien interne au deck : ignoré
     ]
-    r = score_candidates(deck, links, {1: 7, 2: None}, {7: [1, 12]})
+    r = score_candidates(deck, links, {1: 7, 2: None, 3: 7}, {7: [1, 3, 12]})
     assert set(r) == {10, 11, 12}
     assert r[10]["score"] == 2.0 and [d for d, _ in r[10]["avec"]] == [1, 2]
     assert r[11]["score"] == 0.5
-    assert r[12]["score"] == 0.6 and r[12]["avec"] == [(1, 0.6)]
+    assert r[12]["score"] == 1.2 and sorted(d for d, _ in r[12]["avec"]) == [1, 3]
     assert max(r, key=lambda k: r[k]["score"]) == 10
 
 
@@ -158,6 +158,16 @@ def test_hub_does_not_dampen_same_archetype_citers():
     links = [(c, 1, "name", 1.0) for c in citeurs]
     r = score_candidates([1], links, {1: 9, **{c: 9 for c in citeurs}}, {9: [1] + citeurs})
     assert all(v["score"] >= 1.0 for v in r.values())
+
+
+def test_lone_archetype_card_does_not_pull_its_family():
+    from engine.synergy import score_candidates
+
+    # Une seule carte de l'archétype 5 dans le deck : pas de lien d'archétype
+    r = score_candidates([1], [], {1: 5}, {5: [1, 20, 21]})
+    assert r == {}
+    r = score_candidates([1, 2], [], {1: 5, 2: 5}, {5: [1, 2, 20]})
+    assert r[20]["score"] == 1.2
 
 
 def test_score_candidates_empty():
